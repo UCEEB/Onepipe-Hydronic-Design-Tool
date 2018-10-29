@@ -1,6 +1,7 @@
 # Onepipe-Hydronic-Design-Tool
 
 README
+
   Onepipe_design is a tool for onepipe hydronic heating systems design. It 
   computes heat exchanger sizes and water mass flows according to required 
   heat flow values. It builds the whole design task as an optimization 
@@ -12,7 +13,9 @@ README
   read the 'Manual.pdf' file. 
   
 INSTALATION
+
   Extract the content of the archive. 
   
 LICENSE
+
   MIT © Ondrej Zlevor
