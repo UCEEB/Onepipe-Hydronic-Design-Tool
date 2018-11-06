@@ -6,7 +6,7 @@ heat flow values. It builds the whole design task as an optimization
 problem.  
 
 ## System requirements
-* **Windows**. The tool runs an .exe file which limits its utilization for Windows. 
+* **Windows 64bit**. The tool runs an .exe file which limits its utilization for Windows. 
 * **Microsoft Excel**. The user interface is implemented in a MS Excel file. It was not tested using any another office suite.  
 * **MS Excel macros enabled**. It is necessary to have the MS Excel macros enabled, otherwise the optimization program cannot be executed. 
 
