@@ -40,6 +40,7 @@ from openpyxl import Workbook
 from openpyxl.chart import BarChart, Series, Reference
 from openpyxl.drawing.text import CharacterProperties
 from openpyxl.styles import PatternFill
+from openpyxl.styles import Alignment
 import openpyxl
 import os
 from os import system, name 
@@ -75,10 +76,13 @@ def objective(x, args):
 
     W_FOUT = 1000   # weight of penalization of non-correct actual heat flow
     W_Q_N = 0.0001  # weight of penalization of HX size
+    W_M_DOT = 0.2
+#    W_M_DOT = 0
+#    W_Q_N = 0
     
 
-    q_d, Twi, Two_d, Tai, LMTD_n,scFactor = args['q_d'],args['Twi'],\
-        args['Two'],args['Tai'],args['LMTD_n'], args['scaleFactor']
+    q_d, Twi, Two_d, Tai, LMTD_n,scFactor,n_coeff = args['q_d'],args['Twi'],\
+        args['Two'],args['Tai'],args['LMTD_n'], args['scaleFactor'], args['n_coeff']
 
     x = np.multiply(x,scFactor[0:len(x)])
     n = len(q_d);    
@@ -101,7 +105,7 @@ def objective(x, args):
         
         
     
-    # === Compute actual heat flows from HX ===
+    # === Compute actual heat flows from the HX ===
     
     fout = np.zeros(n)
     Twi_vec = np.zeros(n)
@@ -118,7 +122,7 @@ def objective(x, args):
             else:
                  return 1e5
         LMTD = (q_d[iHX]/4185/m_dot[iHX])/math.log((Twi-Tai)/(Twi-Tai-q_d[iHX]/4185/m_dot[iHX]))
-        fout[iHX] = math.pow((q_d[iHX]/q_n[iHX] - LMTD/LMTD_n[iHX]),2)
+        fout[iHX] = math.pow((q_d[iHX]/q_n[iHX] - (LMTD/LMTD_n[iHX])**n_coeff),2)
         Two = Twi - q_d[iHX]/m_dot[iHX]/4185
         Twi = Twi - m_dot[iHX]/m_dot_p*(Twi-Two)
         Twi_vec[iHX] = Twi
@@ -130,7 +134,7 @@ def objective(x, args):
     if args['tag'] is 'opt':
 #        return np.sum(fout)*W_FOUT + np.sum(q_n)*W_Q_N + np.sum(m_dot)
         bnds_dist = -0.95*bnds[0][1] + max(m_dot)
-        return ((np.sum(fout))*W_FOUT) + np.sum(q_n)*W_Q_N + ((1+np.sign(bnds_dist))*bnds_dist*5)**2
+        return ((np.sum(fout))*W_FOUT) + np.sum(q_n)*W_Q_N + ((1+np.sign(bnds_dist))*bnds_dist*5)**2 + np.sum(m_dot)*W_M_DOT
 #        return np.sum(fout)
     elif args['tag'] is 'analyze':
         bnds_dist = -0.95*bnds[0][1] + max(m_dot)
@@ -138,8 +142,8 @@ def objective(x, args):
     elif args['tag'] is 'real':
 #        return np.sum(fout)*W_FOUT + (Twi-Two_d)**2
         m_dot_dist = -0.95*m_dot_p + max(m_dot)
-        return np.sum(fout)  + ((1+np.sign(m_dot_dist))*m_dot_dist*100)**2 + obj_func_penalty
-#        return np.sum(fout)*W_FOUT
+#        return np.sum(fout)  + ((1+np.sign(m_dot_dist))*m_dot_dist*100)**2 + obj_func_penalty
+        return np.sum(fout)
     elif args['tag'] is 'analyze_real':
         m_dot_dist = -0.95*m_dot_p + max(m_dot)
         return {'w_fout': ((np.sum(fout))*W_FOUT), 'w_m_dot': ((1+np.sign(m_dot_dist))*m_dot_dist*100)**2 }
@@ -175,9 +179,9 @@ def find_minimal_solution(x0,args):
     
     args['m_dot_p'] = m_dot_p
     solution = minimize(fun = objective, args = args, x0 = x0,\
-                method='SLSQP', options={'ftol': 1e-9, 'disp': True,'maxiter': 60, 'iprint': 0},\
+                method='SLSQP', options={'ftol': 1e-17, 'disp': True,'maxiter': 60, 'iprint': 0},\
                 bounds = bnds[0:n])  
-    if solution.fun < 1e-5:
+    if solution.fun < 2e-6:
         stopTag = True
     else:
         stopTag = False
@@ -191,7 +195,7 @@ def find_minimal_solution(x0,args):
         
         args['m_dot_p'] = m_dot_p
         solution = minimize(fun = objective, args = args, x0 = x0,\
-                    method='SLSQP', options={'ftol': 1e-7, 'disp': True,'maxiter': 60,  'iprint': 0},\
+                    method='SLSQP', options={'ftol': 1e-9, 'disp': True,'maxiter': 60,  'iprint': 0},\
                     bounds = bnds[0:n]) 
         solution_vec = solution_vec + (solution,)
         m_dot_vec = m_dot_vec + (m_dot_p,)
@@ -337,7 +341,7 @@ problem_setup = {'Twi': sheet['F3'].value, 'Two': sheet['F4'].value,\
                  'm_dot_max_2': sheet['F7'].value,\
                  'catalogue': sheet['AE' + str(sheet['AF3'].value + 2)].value,\
                  'q_d': readRangeAsVector(sheet,'F10','F29'),\
-                 'LMTD_n' : ([50, 50, 50]),'tag': 'opt'}
+                 'LMTD_n' : ([50, 50, 50]),'tag': 'opt', 'n_coeff':sheet['F7'].value}
 
 
 
@@ -345,6 +349,12 @@ problem_setup = {'Twi': sheet['F3'].value, 'Two': sheet['F4'].value,\
 n = len(problem_setup['q_d'])
 sheet_cat = wb.get_sheet_by_name(problem_setup['catalogue'])
 problem_setup['LMTD_n'] = sheet_cat['I3'].value*np.ones(n)
+
+LMTD_actual = (problem_setup['Twi'] - problem_setup['Two'])/\
+np.log((problem_setup['Twi'] - problem_setup['Tai'])/(problem_setup['Two'] - problem_setup['Tai']))
+problem_setup['LMTD_n'] = LMTD_actual*np.ones(n)
+
+q_n_init_scale = (sheet_cat['I3'].value/LMTD_actual)**1.3
 
 x0 = np.concatenate((problem_setup['q_d']/C_P/\
                      (problem_setup['Twi'] - problem_setup['Two'])*\
@@ -381,9 +391,10 @@ cons = {'type':'eq', 'fun': constraint2}
 
 q_heap = buildHeap([], n)
 all_sol = ()
+all_fun = np.zeros(len(q_heap))
 status_vec = np.zeros(len(q_heap))
 for iOpt in range(0,len(q_heap)):
-    w_vec = np.ones(n)*0.8 + np.array(q_heap[iOpt])*0.4
+    w_vec = np.ones(n)*0.7 + np.array(q_heap[iOpt])*0.6
     x0set = x0
     x0set[n:2*n] = np.multiply(x0[n:2*n],w_vec)
 
@@ -394,17 +405,19 @@ for iOpt in range(0,len(q_heap)):
                         bounds = bnds)
     status_vec[iOpt] = solution.status
     all_sol = all_sol + (solution,)
+    all_fun[iOpt] = solution.fun
 
 success_sol = np.extract(status_vec == 0, all_sol)
 if not any(success_sol):
     success_sol = np.extract(status_vec == 9, all_sol)
+        
     
 if any(success_sol):
     fun_vals = [s.fun for s in success_sol]
 
     solution = success_sol[np.argmin(fun_vals)] 
     solution.x
-        
+
     
     x = np.multiply(solution.x,scFactor)
     q_n = x[n:len(x)]
@@ -418,12 +431,29 @@ if any(success_sol):
     Twi_vec[1:n] = Twi_vec[0:n-1]
     Twi_vec[0] = problem_setup['Twi']
     LMTD_vec = temps['LMTD']
-    Q_opt = np.multiply(LMTD_vec/problem_setup['LMTD_n'], q_n)
+    Q_opt = np.multiply((LMTD_vec/problem_setup['LMTD_n'])**problem_setup['n_coeff'], q_n)
     m_dot_opt= x[0:n]
     q_n_opt = q_n
+    m_dot_p_opt = np.sum(problem_setup['q_d'])/4185/(problem_setup['Twi']-problem_setup['Two'])
+#    ---- Pokus ----
+    q_n_init_scale = (sheet_cat['I3'].value/problem_setup['LMTD_n'])**problem_setup['n_coeff']
+#    q_n_opt = q_n_init_scale*q_n
+    q_n = q_n_init_scale*q_n
+    q_n_sc = q_n
+    problem_setup['LMTD_n'] = sheet_cat['I3'].value*np.ones(n)
+    
+    x = solution.x
+    x[n:2*n] = x[n:2*n]*q_n_init_scale
+    xr = np.multiply(x,scFactor)
+    q_n = xr[n:len(xr)]
+    temps = objective(x,problem_setup)
+    LMTD_vec = temps['LMTD']
+    Q_opt_sc = np.multiply((LMTD_vec/problem_setup['LMTD_n'])**problem_setup['n_coeff'], q_n)
+#    --------------
     Two_vec_opt = Two_vec
     
     start_time2 = time.time()
+
 
 
 #%%
@@ -485,59 +515,59 @@ if any(success_sol):
         problem_setup_m['q_n'] = q_n_set
         problem_setup_m['tag'] = 'real'
         
-        
-        x0 = np.append(m_dot_opt,np.sum(problem_setup_m['q_d'])/C_P/(problem_setup_m['Twi'] - problem_setup_m['Two']))
-        scFactor = np.ones(n+1)*max(x0[0:n])
-        x0 = np.divide(x0, scFactor)
-        problem_setup_m['scaleFactor'] = scFactor
-        
-        
-        m_dot_min_vec = problem_setup_m['q_d']/C_P/(problem_setup_m['Two'] - problem_setup_m['Tai'])*1.1
-        m_dot_max_vec = np.sum(problem_setup_m['q_d'])/C_P/((problem_setup_m['Twi'] - problem_setup_m['Two'])/n*2)*np.ones(n)
-        b_m_dot = np.array([m_dot_min_vec*0,m_dot_max_vec])
-        b_m_dot = b_m_dot/scFactor[0]
-        b_m_dot = b_m_dot.transpose()
- 
-        bnds =  (tuple(map(tuple, b_m_dot)))
-        
-        
-        
-        bnds = bnds + ((max(m_dot_min_vec/scFactor[0]),1/scFactor[0]),)
-        cons = ({'type': 'ineq', 'fun':constraint2})
-
-        problem_setup_m['x0'] = x0[0:n]
-        problem_setup_m['bnds'] = bnds
-        
-
-        sol_vec = find_minimal_solution(x0[0:n],problem_setup_m)
-        if 'solution' in sol_vec:
-            solution = sol_vec['solution']
-            solution.x = np.append(solution.x,sol_vec['m_dot_p']/scFactor[n])
+        if (np.multiply(q_heap[iSet],q_n_higher_lower.transpose()[1]) < q_n_higher_lower.transpose()[0]).all():
+            x0 = np.append(m_dot_opt,np.sum(problem_setup_m['q_d'])/C_P/(problem_setup_m['Twi'] - problem_setup_m['Two']))
+            scFactor = np.ones(n+1)*max(x0[0:n])
+            x0 = np.divide(x0, scFactor)
             problem_setup_m['scaleFactor'] = scFactor
+            
+            
+            m_dot_min_vec = problem_setup_m['q_d']/C_P/(problem_setup_m['Two'] - problem_setup_m['Tai'])*1.1
+            m_dot_max_vec = np.sum(problem_setup_m['q_d'])/C_P/((problem_setup_m['Twi'] - problem_setup_m['Two'])/n*2)*np.ones(n)
+            b_m_dot = np.array([m_dot_min_vec*0,m_dot_max_vec])
+            b_m_dot = b_m_dot/scFactor[0]
+            b_m_dot = b_m_dot.transpose()
+     
+            bnds =  (tuple(map(tuple, b_m_dot)))
+            
+            
+            
+            bnds = bnds + ((max(m_dot_min_vec/scFactor[0]),1/scFactor[0]),)
+            cons = ({'type': 'ineq', 'fun':constraint2})
     
+            problem_setup_m['x0'] = x0[0:n]
+            problem_setup_m['bnds'] = bnds
+            
+    
+            sol_vec = find_minimal_solution(x0[0:n],problem_setup_m)
+            if 'solution' in sol_vec:
+                solution = sol_vec['solution']
+                solution.x = np.append(solution.x,sol_vec['m_dot_p']/scFactor[n])
+                problem_setup_m['scaleFactor'] = scFactor
         
-        
-            solution_vec = solution_vec + (solution,)
             
             
-            problem_setup_m['tag'] = 'sim'
-            temps = objective(solution.x,problem_setup_m)
-            Twi_vec = temps['Twi']
-            Two_vec = temps['Two']
-            Twi_all[iSet][:] = Twi_vec
-            Twi_vec[1:n] = Twi_vec[0:n-1]
-            Twi_vec[0] = problem_setup['Twi']
-            Two_all[iSet][:] = Two_vec
-            m_dot_all[iSet][:] = np.multiply(scFactor,solution.x)
-            fout_all[iSet]= temps['fout']
-            LMTD_vec = temps['LMTD']
-            Q_max = np.multiply(np.power(([xHX - problem_setup_m['Tai'] for xHX in Twi_vec])\
-                /problem_setup_m['LMTD_n'],1.3),q_n_set)
-            Q = np.multiply(LMTD_vec/problem_setup_m['LMTD_n'], q_n_set)
-  
-            Q_res[iSet][:] = Q
-            Q_max_vec = Q_max_vec + (Q_max,)
-            final_obj[iSet] = np.sum(np.power((problem_setup['q_d'] - Q),2))
+                solution_vec = solution_vec + (solution,)
+                
+                
+                problem_setup_m['tag'] = 'sim'
+                temps = objective(solution.x,problem_setup_m)
+                Twi_vec = temps['Twi']
+                Two_vec = temps['Two']
+                Twi_all[iSet][:] = Twi_vec
+                Twi_vec[1:n] = Twi_vec[0:n-1]
+                Twi_vec[0] = problem_setup['Twi']
+                Two_all[iSet][:] = Two_vec
+                m_dot_all[iSet][:] = np.multiply(scFactor,solution.x)
+                fout_all[iSet]= temps['fout']
+                LMTD_vec = temps['LMTD']
+                Q_max = np.multiply(np.power(([xHX - problem_setup_m['Tai'] for xHX in Twi_vec])\
+                    /problem_setup_m['LMTD_n'],1.3),q_n_set)
+                Q = np.multiply((LMTD_vec/problem_setup_m['LMTD_n'])**problem_setup_m['n_coeff'], q_n_set)
+      
+                Q_res[iSet][:] = Q
+                Q_max_vec = Q_max_vec + (Q_max,)
+                final_obj[iSet] = np.sum(np.power((problem_setup['q_d'] - Q),2))
         q_n_all[iSet][:] = q_n_set
         exec_time_vec[iSet] = time.time() - last_time
     
@@ -594,8 +624,8 @@ if any(success_sol):
     fillRange(sheet, 'A1','E1', 'FFDCE6F1')
     
     for iHX in range(0,n):                
-        sheet.cell(row=2+iHX,column=1,value=Q_opt[iHX])
-        sheet.cell(row=2+iHX,column=2,value=q_n_opt[iHX])
+        sheet.cell(row=2+iHX,column=1,value=Q_opt_sc[iHX])
+        sheet.cell(row=2+iHX,column=2,value=q_n_sc[iHX])
         sheet.cell(row=2+iHX,column=3,value=m_dot_opt[iHX]*3600)
         if iHX > 0:
             sheet.cell(row=2+iHX,column=4,value=Twi_vec_opt[iHX-1])
@@ -603,8 +633,11 @@ if any(success_sol):
             sheet.cell(row=2+iHX,column=4,value=problem_setup['Twi'])
         sheet.cell(row=2+iHX,column=5,value=Two_vec_opt[iHX])
         
-        
-    sheet.cell(row=iHX+3,column=4,value=Twi_vec_opt[iHX])
+    
+    sheet.cell(row=iHX+4,column=3,value='Tbi [°C]:')    
+    sheet.cell(row=iHX+4,column=4,value=Twi_vec_opt[iHX])
+    sheet.cell(row=iHX+4,column=1,value='m_dot_p [kg/h]:')
+    sheet.cell(row=iHX+4,column=2,value=m_dot_p_opt*3600)
     
     chart1 = BarChart()
     chart1.type = "col"
@@ -645,7 +678,10 @@ if any(success_sol):
     sheet.add_chart(chart2, "G14")
 else:
     sheet.merge_cells('B2:L2')
-    sheet.cell(row = 2, column = 2, value = 'Solver was not able to find any solution. Please, try to modify required heat flows or to choose a different catalogue list.')
+    sheet['B2'].alignment = Alignment(wrapText=True)
+    sheet.row_dimensions[2].height = 40
+    sheet.cell(row = 2, column = 2, value = 'Solver was not able to find any solution. Please, try to modify required heat flows or to choose a different catalogue list. To help to improve this tool, please contact me at ondrej.zlevor@cvut.cz. ')
+
 
     
 
@@ -670,8 +706,8 @@ if not any(Q_res[len(Q_res)-1] == 0):
 # find set with lowest Two temperature
 Twi_min = problem_setup['Twi']
 Twi_min_idx = 0
-for iSet in range(0,len(Twi_all)):
-    if Twi_all[iSet][n-1] < Twi_min and Twi_all[iSet][n-1] > 0:
+for iSet in range(1,len(Twi_all)):
+    if Twi_all[iSet][n-1] < Twi_min and Twi_all[iSet][n-1] > 0 and final_obj[iSet] < 0.2:
         Twi_min = Twi_all[iSet][n-1]
         Twi_min_idx = iSet
 
@@ -683,13 +719,17 @@ sheet.column_dimensions["F"].width = 30
 
 if len(iChosen) == 0:
     sheet.merge_cells('B2:L2')
-    sheet.cell(row = 2, column = 2, value = 'Solver was not able to find any solution. Please, try to modify required heat flows or to choose a different catalogue list.')
+    sheet['B2'].alignment = Alignment(wrapText=True)
+    sheet.row_dimensions[2].height = 40
+    sheet.cell(row = 2, column = 2, value = 'Solver was not able to find any solution. Please, try to modify required heat flows or to choose a different catalogue list. To help to improve this tool, please contact me at ondrej.zlevor@cvut.cz. ')
 
 for iSet in range(0,len(iChosen)):
     
     
     sheet.cell(row=INIT_ROWS - 1 + iSet*n + iSet*varSpace,column=1,value='Fobj')
-    sheet.cell(row=INIT_ROWS - 1 + iSet*n + iSet*varSpace,column=2,value=final_obj[iChosen[iSet]])
+    sheet.cell(row=INIT_ROWS - 1 + iSet*n + iSet*varSpace,column=2,value=final_obj[iChosen[iSet]])    
+    sheet.cell(row=INIT_ROWS - 1 + iSet*n + iSet*varSpace,column=4,value='m_dot_p [kg/h]')
+    sheet.cell(row=INIT_ROWS - 1 + iSet*n + iSet*varSpace,column=5,value=m_dot_all[iChosen[iSet]][n]*3600)
     sheet.cell(row=INIT_ROWS + iSet*n + iSet*varSpace,column=1,value='Q [W]')
     sheet.cell(row=INIT_ROWS + iSet*n + iSet*varSpace,column=2,value='Q_n [W]')
     sheet.cell(row=INIT_ROWS + iSet*n + iSet*varSpace,column=3,value='m_dot [kg/h]')
@@ -714,7 +754,8 @@ for iSet in range(0,len(iChosen)):
         
         sheet.cell(row=iHX+INIT_ROWS+1 + iSet*n + iSet*varSpace,column=6,value =\
                    q_n_names[q_n_unsrt.tolist().index(q_n_all[iChosen[iSet]][iHX])] )
-        
+    
+    sheet.cell(row=iHX+INIT_ROWS+2 + iSet*n + iSet*varSpace,column=3,value='Tbi [°C]:')       
     sheet.cell(row=iHX+INIT_ROWS+2 + iSet*n + iSet*varSpace,column=4,value=Twi_all[iChosen[iSet]][iHX])
     
     chart1 = BarChart()
@@ -807,7 +848,8 @@ for iSetHX in range(0,len(q_heap)):
             sheet.cell(row=iHX+INIT_ROWS+1 + iSet*n + iSet*varSpace,column=5,value=Two_all[iSetHX][iHX])
             
             sheet.cell(row=iHX+INIT_ROWS+1 + iSet*n + iSet*varSpace,column=6,value = q_n_names[q_n_unsrt.tolist().index(q_n_all[iSetHX][iHX])] )
-            
+        
+        sheet.cell(row=iHX+INIT_ROWS+2 + iSet*n + iSet*varSpace,column=3,value='Tbi [°C]:')       
         sheet.cell(row=iHX+INIT_ROWS+2 + iSet*n + iSet*varSpace,column=4,value=Twi_all[iSetHX][iHX])
         
         chart1 = BarChart()
@@ -854,8 +896,9 @@ for iSetHX in range(0,len(q_heap)):
     
 if iSet < 0:
     sheet.merge_cells('B2:L2')
-    sheet.cell(row = 2, column = 2, value = 'Solver was not able to find any solution. Please, try to modify required heat flows or to choose a different catalogue list.')
-
+    sheet['B2'].alignment = Alignment(wrapText=True)
+    sheet.row_dimensions[2].height = 40
+    sheet.cell(row = 2, column = 2, value = 'Solver was not able to find any solution. Please, try to modify required heat flows or to choose a different catalogue list. To help to improve this tool, please contact me at ondrej.zlevor@cvut.cz. ')
 
     
     
